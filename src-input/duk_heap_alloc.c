@@ -795,15 +795,7 @@ duk_heap *duk_heap_alloc(duk_alloc_function alloc_func,
 	res->heap_thread = NULL;
 	res->curr_thread = NULL;
 	res->heap_object = NULL;
-#if defined(DUK_USE_STRTAB_CHAIN)
-	/* nothing to NULL */
-#elif defined(DUK_USE_STRTAB_PROBE)
-#if defined(DUK_USE_HEAPPTR16)
-	res->strtable16 = (duk_uint16_t *) NULL;
-#else
-	res->strtable = (duk_hstring **) NULL;
-#endif
-#endif
+	res->strtable = NULL;
 #if defined(DUK_USE_ROM_STRINGS)
 	/* no res->strs[] */
 #else  /* DUK_USE_ROM_STRINGS */
@@ -882,59 +874,24 @@ duk_heap *duk_heap_alloc(duk_alloc_function alloc_func,
 	 *  Init stringtable: fixed variant
 	 */
 
-#if defined(DUK_USE_STRTAB_CHAIN)
-	DUK_MEMZERO(res->strtable, sizeof(duk_strtab_entry) * DUK_STRTAB_CHAIN_SIZE);
-#if defined(DUK_USE_EXPLICIT_NULL_INIT)
-	{
-		duk_small_uint_t i;
-	        for (i = 0; i < DUK_STRTAB_CHAIN_SIZE; i++) {
-#if defined(DUK_USE_HEAPPTR16)
-			res->strtable[i].u.str16 = res->heapptr_null16;
-#else
-			res->strtable[i].u.str = NULL;
-#endif
-	        }
-	}
-#endif  /* DUK_USE_EXPLICIT_NULL_INIT */
-#endif  /* DUK_USE_STRTAB_CHAIN */
-
-	/*
-	 *  Init stringtable: probe variant
-	 */
-
-#if defined(DUK_USE_STRTAB_PROBE)
-#if defined(DUK_USE_HEAPPTR16)
-	res->strtable16 = (duk_uint16_t *) alloc_func(heap_udata, sizeof(duk_uint16_t) * DUK_STRTAB_INITIAL_SIZE);
-	if (!res->strtable16) {
-		goto error;
-	}
-#else  /* DUK_USE_HEAPPTR16 */
-	res->strtable = (duk_hstring **) alloc_func(heap_udata, sizeof(duk_hstring *) * DUK_STRTAB_INITIAL_SIZE);
+	res->strtable = (duk_hstring **) DUK_ALLOC(res, sizeof(duk_hstring *) * 1024);  /* FIXME: size */
 	if (!res->strtable) {
 		goto error;
 	}
-#endif  /* DUK_USE_HEAPPTR16 */
-	res->st_size = DUK_STRTAB_INITIAL_SIZE;
+	res->st_size = 1024;
+	res->st_mask = res->st_size - 1;
+	res->st_count = 0;
+
 #if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	{
 		duk_small_uint_t i;
-		DUK_ASSERT(res->st_size == DUK_STRTAB_INITIAL_SIZE);
-	        for (i = 0; i < DUK_STRTAB_INITIAL_SIZE; i++) {
-#if defined(DUK_USE_HEAPPTR16)
-			res->strtable16[i] = res->heapptr_null16;
-#else
+	        for (i = 0; i < 1024; i++) {
 			res->strtable[i] = NULL;
-#endif
 	        }
 	}
-#else  /* DUK_USE_EXPLICIT_NULL_INIT */
-#if defined(DUK_USE_HEAPPTR16)
-	DUK_MEMZERO(res->strtable16, sizeof(duk_uint16_t) * DUK_STRTAB_INITIAL_SIZE);
 #else
-	DUK_MEMZERO(res->strtable, sizeof(duk_hstring *) * DUK_STRTAB_INITIAL_SIZE);
-#endif
+	DUK_MEMZERO(res->strtable, sizeof(duk_hstring *) * 1024);
 #endif  /* DUK_USE_EXPLICIT_NULL_INIT */
-#endif  /* DUK_USE_STRTAB_PROBE */
 
 	/*
 	 *  Init stringcache
@@ -1035,7 +992,7 @@ duk_heap *duk_heap_alloc(duk_alloc_function alloc_func,
 	DUK_D(DUK_DPRINT("allocated heap: %p", (void *) res));
 	return res;
 
- error:
+ error:  /* FIXME: rename */
 	DUK_D(DUK_DPRINT("heap allocation failed"));
 
 	if (res) {

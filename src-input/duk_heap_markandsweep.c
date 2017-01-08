@@ -539,185 +539,67 @@ DUK_LOCAL void duk__clear_finalize_list_flags(duk_heap *heap) {
  *  Sweep stringtable
  */
 
-#if defined(DUK_USE_STRTAB_CHAIN)
-
-/* XXX: skip count_free w/o debug? */
-#if defined(DUK_USE_HEAPPTR16)
-DUK_LOCAL void duk__sweep_string_chain16(duk_heap *heap, duk_uint16_t *slot, duk_size_t *count_keep, duk_size_t *count_free) {
-	duk_uint16_t h16 = *slot;
+DUK_LOCAL void duk__sweep_stringtable(duk_heap *heap, duk_size_t *out_count_keep) {
 	duk_hstring *h;
-	duk_uint16_t null16 = heap->heapptr_null16;
-
-	if (h16 == null16) {
-		/* nop */
-		return;
-	}
-	h = (duk_hstring *) DUK_USE_HEAPPTR_DEC16(heap->heap_udata, h16);
-	DUK_ASSERT(h != NULL);
-
-	if (DUK_HEAPHDR_HAS_REACHABLE((duk_heaphdr *) h)) {
-		DUK_HEAPHDR_CLEAR_REACHABLE((duk_heaphdr *) h);
-		(*count_keep)++;
-	} else {
-#if defined(DUK_USE_REFERENCE_COUNTING)
-		DUK_ASSERT(DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h) == 0);
-#endif
-		/* deal with weak references first */
-		duk_heap_strcache_string_remove(heap, (duk_hstring *) h);
-		*slot = null16;
-
-		/* free inner references (these exist e.g. when external
-		 * strings are enabled)
-		 */
-		duk_free_hstring(heap, h);
-		(*count_free)++;
-	}
-}
-#else  /* DUK_USE_HEAPPTR16 */
-DUK_LOCAL void duk__sweep_string_chain(duk_heap *heap, duk_hstring **slot, duk_size_t *count_keep, duk_size_t *count_free) {
-	duk_hstring *h = *slot;
-
-	if (h == NULL) {
-		/* nop */
-		return;
-	}
-
-	if (DUK_HEAPHDR_HAS_REACHABLE((duk_heaphdr *) h)) {
-		DUK_HEAPHDR_CLEAR_REACHABLE((duk_heaphdr *) h);
-		(*count_keep)++;
-	} else {
-#if defined(DUK_USE_REFERENCE_COUNTING)
-		DUK_ASSERT(DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h) == 0);
-#endif
-		/* deal with weak references first */
-		duk_heap_strcache_string_remove(heap, (duk_hstring *) h);
-		*slot = NULL;
-
-		/* free inner references (these exist e.g. when external
-		 * strings are enabled)
-		 */
-		duk_free_hstring(heap, h);
-		(*count_free)++;
-	}
-}
-#endif  /* DUK_USE_HEAPPTR16 */
-
-DUK_LOCAL void duk__sweep_stringtable_chain(duk_heap *heap, duk_size_t *out_count_keep) {
-	duk_strtab_entry *e;
-	duk_uint_fast32_t i;
-	duk_size_t count_free = 0;
-	duk_size_t count_keep = 0;
-	duk_size_t j, n;
-#if defined(DUK_USE_HEAPPTR16)
-	duk_uint16_t *lst;
-#else
-	duk_hstring **lst;
-#endif
-
-	DUK_DD(DUK_DDPRINT("duk__sweep_stringtable: %p", (void *) heap));
-
-	/* Non-zero refcounts should not happen for unreachable strings,
-	 * because we refcount finalize all unreachable objects which
-	 * should have decreased unreachable string refcounts to zero
-	 * (even for cycles).
-	 */
-
-	for (i = 0; i < DUK_STRTAB_CHAIN_SIZE; i++) {
-		e = heap->strtable + i;
-		if (e->listlen == 0) {
-#if defined(DUK_USE_HEAPPTR16)
-			duk__sweep_string_chain16(heap, &e->u.str16, &count_keep, &count_free);
-#else
-			duk__sweep_string_chain(heap, &e->u.str, &count_keep, &count_free);
-#endif
-		} else {
-#if defined(DUK_USE_HEAPPTR16)
-			lst = (duk_uint16_t *) DUK_USE_HEAPPTR_DEC16(heap->heap_udata, e->u.strlist16);
-#else
-			lst = e->u.strlist;
-#endif
-			for (j = 0, n = e->listlen; j < n; j++) {
-#if defined(DUK_USE_HEAPPTR16)
-				duk__sweep_string_chain16(heap, lst + j, &count_keep, &count_free);
-#else
-				duk__sweep_string_chain(heap, lst + j, &count_keep, &count_free);
-#endif
-			}
-		}
-	}
-
-	DUK_D(DUK_DPRINT("mark-and-sweep sweep stringtable: %ld freed, %ld kept",
-	                 (long) count_free, (long) count_keep));
-	*out_count_keep = count_keep;
-}
-#endif  /* DUK_USE_STRTAB_CHAIN */
-
-#if defined(DUK_USE_STRTAB_PROBE)
-DUK_LOCAL void duk__sweep_stringtable_probe(duk_heap *heap, duk_size_t *out_count_keep) {
-	duk_hstring *h;
-	duk_uint_fast32_t i;
+	duk_uint32_t i;
 #if defined(DUK_USE_DEBUG)
 	duk_size_t count_free = 0;
 #endif
 	duk_size_t count_keep = 0;
 
 	DUK_DD(DUK_DDPRINT("duk__sweep_stringtable: %p", (void *) heap));
+
+	if (heap->strtable == NULL) {
+		goto done;
+	}
 
 	for (i = 0; i < heap->st_size; i++) {
-#if defined(DUK_USE_HEAPPTR16)
-		h = (duk_hstring *) DUK_USE_HEAPPTR_DEC16(heap->heap_udata, heap->strtable16[i]);
-#else
 		h = heap->strtable[i];
-#endif
-		if (h == NULL || h == DUK_STRTAB_DELETED_MARKER(heap)) {
-			continue;
-		} else if (DUK_HEAPHDR_HAS_REACHABLE((duk_heaphdr *) h)) {
-			DUK_HEAPHDR_CLEAR_REACHABLE((duk_heaphdr *) h);
-			count_keep++;
-			continue;
-		}
+		while (h != NULL) {
+			duk_hstring *next;
+			next = h->hdr.h_next;
 
+			if (DUK_HEAPHDR_HAS_REACHABLE((duk_heaphdr *) h)) {
+				DUK_HEAPHDR_CLEAR_REACHABLE((duk_heaphdr *) h);
+				count_keep++;
+			} else {
 #if defined(DUK_USE_DEBUG)
-		count_free++;
+				count_free++;
 #endif
 
 #if defined(DUK_USE_REFERENCE_COUNTING)
-		/* Non-zero refcounts should not happen for unreachable strings,
-		 * because we refcount finalize all unreachable objects which
-		 * should have decreased unreachable string refcounts to zero
-		 * (even for cycles).
-		 */
-		DUK_ASSERT(DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h) == 0);
+				/* Non-zero refcounts should not happen for unreachable strings,
+				 * because we refcount finalize all unreachable objects which
+				 * should have decreased unreachable string refcounts to zero
+				 * (even for cycles).
+				 */
+				DUK_ASSERT(DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h) == 0);
 #endif
 
-		DUK_DDD(DUK_DDDPRINT("sweep string, not reachable: %p", (void *) h));
+				/* deal with weak references first */
+				duk_heap_strcache_string_remove(heap, (duk_hstring *) h);
 
-		/* deal with weak references first */
-		duk_heap_strcache_string_remove(heap, (duk_hstring *) h);
+				/* FIXME: support chain handling directly here */
+				/* remove the string from the string table */
+				duk_heap_string_remove(heap, (duk_hstring *) h);
 
-		/* remove the string (mark DELETED), could also call
-		 * duk_heap_string_remove() but that would be slow and
-		 * pointless because we already know the slot.
-		 */
-#if defined(DUK_USE_HEAPPTR16)
-		heap->strtable16[i] = heap->heapptr_deleted16;
-#else
-		heap->strtable[i] = DUK_STRTAB_DELETED_MARKER(heap);
-#endif
+				/* free inner references (these exist e.g. when external
+				 * strings are enabled) and the struct itself.
+				 */
+				duk_free_hstring(heap, (duk_hstring *) h);
+			}
 
-		/* free inner references (these exist e.g. when external
-		 * strings are enabled) and the struct itself.
-		 */
-		duk_free_hstring(heap, (duk_hstring *) h);
+			h = next;
+		}
 	}
 
+ done:
 #if defined(DUK_USE_DEBUG)
 	DUK_D(DUK_DPRINT("mark-and-sweep sweep stringtable: %ld freed, %ld kept",
 	                 (long) count_free, (long) count_keep));
 #endif
 	*out_count_keep = count_keep;
 }
-#endif  /* DUK_USE_STRTAB_PROBE */
 
 /*
  *  Sweep heap
@@ -1282,13 +1164,7 @@ DUK_INTERNAL duk_bool_t duk_heap_mark_and_sweep(duk_heap *heap, duk_small_uint_t
 	duk__finalize_refcounts(heap);
 #endif
 	duk__sweep_heap(heap, flags, &count_keep_obj);
-#if defined(DUK_USE_STRTAB_CHAIN)
-	duk__sweep_stringtable_chain(heap, &count_keep_str);
-#elif defined(DUK_USE_STRTAB_PROBE)
-	duk__sweep_stringtable_probe(heap, &count_keep_str);
-#else
-#error internal error, invalid strtab options
-#endif
+	duk__sweep_stringtable(heap, &count_keep_str);
 #if defined(DUK_USE_REFERENCE_COUNTING)
 	duk__clear_refzero_list_flags(heap);
 #endif

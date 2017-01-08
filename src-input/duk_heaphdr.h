@@ -11,8 +11,7 @@
  *
  *  All heap objects share the same flags and refcount fields.  Objects other
  *  than strings also need to have a single or double linked list pointers
- *  for insertion into the "heap allocated" list.  Strings are held in the
- *  heap-wide string table so they don't need link pointers.
+ *  for insertion into the "heap allocated" list.  Strings FIXME.
  *
  *  Technically, 'h_refcount' must be wide enough to guarantee that it cannot
  *  wrap (otherwise objects might be freed incorrectly after wrapping).  This
@@ -83,6 +82,13 @@ struct duk_heaphdr_string {
 #else
 	duk_uint16_t h_strextra16;
 #endif
+
+	duk_hstring *h_next;
+	duk_hstring *h_prev;
+
+	/* FIXME: double linked would allow quickest possible removal which
+	 * is great if there's a lot of churn.
+	 */
 };
 
 #define DUK_HEAPHDR_FLAGS_TYPE_MASK      0x00000003UL
@@ -240,7 +246,9 @@ struct duk_heaphdr_string {
 	} while (0)
 #endif
 
-#define DUK_HEAPHDR_STRING_INIT_NULLS(h)  /* currently nop */
+#define DUK_HEAPHDR_STRING_INIT_NULLS(h)  do { \
+		(h)->h_next = (h)->h_prev = NULL; \
+	} while (0)
 
 /*
  *  Type tests

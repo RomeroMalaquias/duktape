@@ -318,29 +318,6 @@ struct duk_ljstate {
 };
 
 /*
- *  Stringtable entry for fixed size stringtable
- */
-
-struct duk_strtab_entry {
-#if defined(DUK_USE_HEAPPTR16)
-	/* A 16-bit listlen makes sense with 16-bit heap pointers: there
-	 * won't be space for 64k strings anyway.
-	 */
-	duk_uint16_t listlen;  /* if 0, 'str16' used, if > 0, 'strlist16' used */
-	union {
-		duk_uint16_t strlist16;
-		duk_uint16_t str16;
-	} u;
-#else
-	duk_size_t listlen;  /* if 0, 'str' used, if > 0, 'strlist' used */
-	union {
-		duk_hstring **strlist;
-		duk_hstring *str;
-	} u;
-#endif
-};
-
-/*
  *  Main heap structure
  */
 
@@ -479,22 +456,10 @@ struct duk_heap {
 #endif
 
 	/* string intern table (weak refs) */
-#if defined(DUK_USE_STRTAB_PROBE)
-#if defined(DUK_USE_HEAPPTR16)
-	duk_uint16_t *strtable16;
-#else
 	duk_hstring **strtable;
-#endif
-	duk_uint32_t st_size;     /* alloc size in elements */
-	duk_uint32_t st_used;     /* used elements (includes DELETED) */
-#endif
-
-	/* XXX: static alloc is OK until separate chaining stringtable
-	 * resizing is implemented.
-	 */
-#if defined(DUK_USE_STRTAB_CHAIN)
-	duk_strtab_entry strtable[DUK_STRTAB_CHAIN_SIZE];
-#endif
+	duk_uint32_t st_mask;    /* mask for lookup, st_size - 1 */
+	duk_uint32_t st_size;    /* stringtable size */
+	duk_uint32_t st_count;   /* string count for load checks */
 
 	/* string access cache (codepoint offset -> byte offset) for fast string
 	 * character looping; 'weak' reference which needs special handling in GC.
